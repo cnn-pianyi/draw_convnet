@@ -1,6 +1,6 @@
 """
 Copyright (c) 2017, Gavin Weiguang Ding
-All rights reserved.
+All rights reserved
 
 Redistribution and use in source and binary forms, with or without
     modification, are permitted provided that the following conditions are met:
@@ -30,215 +30,53 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
 """
 
 
-import os
+import torch
+import torchvision
 import numpy as np
-import matplotlib.pyplot as plt
-plt.rcdefaults()
-from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
-from matplotlib.patches import Circle
-
-NumDots = 4
-NumConvMax = 8
-NumFcMax = 20
-White = 1.
-Light = 0.7
-Medium = 0.5
-Dark = 0.3
-Darker = 0.15
-Black = 0.
-
-
-def add_layer(patches, colors, size=(24, 24), num=5,
-              top_left=[0, 0],
-              loc_diff=[3, -3],
-              ):
-    # add a rectangle
-    top_left = np.array(top_left)
-    loc_diff = np.array(loc_diff)
-    loc_start = top_left - np.array([0, size[0]])
-    for ind in range(num):
-        patches.append(Rectangle(loc_start + ind * loc_diff, size[1], size[0]))
-        if ind % 2:
-            colors.append(Medium)
-        else:
-            colors.append(Light)
-
-
-def add_layer_with_omission(patches, colors, size=(24, 24),
-                            num=5, num_max=8,
-                            num_dots=4,
-                            top_left=[0, 0],
-                            loc_diff=[3, -3],
-                            ):
-    # add a rectangle
-    top_left = np.array(top_left)
-    loc_diff = np.array(loc_diff)
-    loc_start = top_left - np.array([0, size[0]])
-    this_num = min(num, num_max)
-    start_omit = (this_num - num_dots) // 2
-    end_omit = this_num - start_omit
-    start_omit -= 1
-    for ind in range(this_num):
-        if (num > num_max) and (start_omit < ind < end_omit):
-            omit = True
-        else:
-            omit = False
-
-        if omit:
-            patches.append(
-                Circle(loc_start + ind * loc_diff + np.array(size) / 2, 0.5))
-        else:
-            patches.append(Rectangle(loc_start + ind * loc_diff,
-                                     size[1], size[0]))
-
-        if omit:
-            colors.append(Black)
-        elif ind % 2:
-            colors.append(Medium)
-        else:
-            colors.append(Light)
-
-
-def add_mapping(patches, colors, start_ratio, end_ratio, patch_size, ind_bgn,
-                top_left_list, loc_diff_list, num_show_list, size_list):
-
-    start_loc = top_left_list[ind_bgn] \
-        + (num_show_list[ind_bgn] - 1) * np.array(loc_diff_list[ind_bgn]) \
-        + np.array([start_ratio[0] * (size_list[ind_bgn][1] - patch_size[1]),
-                    - start_ratio[1] * (size_list[ind_bgn][0] - patch_size[0])]
-                   )
+import tensorflow as tf
+from torch.utils.data import DataLoader
+from torch.utils.data import Dataset, DataLoader
+from torchvision import transforms
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim 
 
 
 
-
-    end_loc = top_left_list[ind_bgn + 1] \
-        + (num_show_list[ind_bgn + 1] - 1) * np.array(
-            loc_diff_list[ind_bgn + 1]) \
-        + np.array([end_ratio[0] * size_list[ind_bgn + 1][1],
-                    - end_ratio[1] * size_list[ind_bgn + 1][0]])
-
-
-    patches.append(Rectangle(start_loc, patch_size[1], -patch_size[0]))
-    colors.append(Dark)
-    patches.append(Line2D([start_loc[0], end_loc[0]],
-                          [start_loc[1], end_loc[1]]))
-    colors.append(Darker)
-    patches.append(Line2D([start_loc[0] + patch_size[1], end_loc[0]],
-                          [start_loc[1], end_loc[1]]))
-    colors.append(Darker)
-    patches.append(Line2D([start_loc[0], end_loc[0]],
-                          [start_loc[1] - patch_size[0], end_loc[1]]))
-    colors.append(Darker)
-    patches.append(Line2D([start_loc[0] + patch_size[1], end_loc[0]],
-                          [start_loc[1] - patch_size[0], end_loc[1]]))
-    colors.append(Darker)
+# 设定参数
+n_epochs = 500             # 设定循环训练集的次数
+learning_rate = 0.003     # 学习率。原来是0.01
+momentum = 0.5           # 动量，可以被看作是梯度下降过程中的“惯性”
+log_interval = 10        # 日志打印间隔
+random_seed = 1          # 为使实验可重复，设定随机种子以产生相同序列的随机数
+torch.manual_seed(random_seed)
 
 
+# 定义一个名为 Net 的新类，其基于PyTorch中所有神经网络模块的基类
+class Net(nn.Module):
+    def __init__(self):                                                   # init 是类的构造函数，self代表类的当前对象
+        super(Net, self).__init__()                                       # 调用nn.Module的__init__方法，正确执行初始化
+        self.conv1 = nn.Conv2d(1, 8, kernel_size=5)                       # 2维卷积层，1个单通道输入，10个特征图输出，卷积核大小是5x5，数字是随机数
+        self.conv2 = nn.Conv2d(8, 16, kernel_size=5)   
+        self.conv3 = nn.Conv2d(16, 32, kernel_size=5)
+        self.conv3_drop = nn.Dropout2d()                                  # 2维dropout层，随机“关闭”输入单元的一部分（即它们输出为0），利于模型泛化、防止神经网络过拟合
+        self.fc1 = nn.Linear(32*5*5, 50)                                  # 全连接层，32*32*32个特征输入，50个特征输出
+        self.fc2 = nn.Linear(50, 3)
+        self.dropout = nn.Dropout()                                       # 添加这一行定义Dropout
+    def forward(self, x):
+        x = F.relu(F.max_pool2d(self.conv1(x), 2))                         
+        # print("conv1 output shape:", x.shape)
+        x = F.relu(F.max_pool2d(self.conv2(x), 2))                         
+        # print("conv2 output shape:", x.shape)
+        x = F.relu(F.max_pool2d(self.conv3_drop(self.conv3(x)), 2))        # print("conv3 output shape:", x.shape) # print("卷积层和池化层后的形状: ", x.shape)
+        x = x.view(-1, 32*5*5)                                             # 整形x，使其可被全连接层处理；-1表示该维度的大小由数据自动计算
+        x = F.relu(self.fc1(x))
+        x = self.dropout(x)        
+        x = self.fc2(x)
+        return x
 
-def label(xy, text, xy_off=[0, 4]):
-    plt.text(xy[0] + xy_off[0], xy[1] + xy_off[1], text,
-             family='sans-serif', size=8)
-
-
-if __name__ == '__main__':
-
-    fc_unit_size = 2
-    layer_width = 40
-    flag_omit = True
-
-    patches = []
-    colors = []
-
-    fig, ax = plt.subplots()
-
-
-    ############################
-    # conv layers
-    size_list = [(32, 32), (18, 18), (10, 10), (6, 6), (4, 4)]
-    num_list = [3, 32, 32, 48, 48]
-    x_diff_list = [0, layer_width, layer_width, layer_width, layer_width]
-    text_list = ['Inputs'] + ['Feature\nmaps'] * (len(size_list) - 1)
-    loc_diff_list = [[3, -3]] * len(size_list)
-
-    num_show_list = list(map(min, num_list, [NumConvMax] * len(num_list)))
-    top_left_list = np.c_[np.cumsum(x_diff_list), np.zeros(len(x_diff_list))]
-
-    for ind in range(len(size_list)-1,-1,-1):
-        if flag_omit:
-            add_layer_with_omission(patches, colors, size=size_list[ind],
-                                    num=num_list[ind],
-                                    num_max=NumConvMax,
-                                    num_dots=NumDots,
-                                    top_left=top_left_list[ind],
-                                    loc_diff=loc_diff_list[ind])
-        else:
-            add_layer(patches, colors, size=size_list[ind],
-                      num=num_show_list[ind],
-                      top_left=top_left_list[ind], loc_diff=loc_diff_list[ind])
-        label(top_left_list[ind], text_list[ind] + '\n{}@{}x{}'.format(
-            num_list[ind], size_list[ind][0], size_list[ind][1]))
-
-    ############################
-    # in between layers
-    start_ratio_list = [[0.4, 0.5], [0.4, 0.8], [0.4, 0.5], [0.4, 0.8]]
-    end_ratio_list = [[0.4, 0.5], [0.4, 0.8], [0.4, 0.5], [0.4, 0.8]]
-    patch_size_list = [(5, 5), (2, 2), (5, 5), (2, 2)]
-    ind_bgn_list = range(len(patch_size_list))
-    text_list = ['Convolution', 'Max-pooling', 'Convolution', 'Max-pooling']
-
-    for ind in range(len(patch_size_list)):
-        add_mapping(
-            patches, colors, start_ratio_list[ind], end_ratio_list[ind],
-            patch_size_list[ind], ind,
-            top_left_list, loc_diff_list, num_show_list, size_list)
-        label(top_left_list[ind], text_list[ind] + '\n{}x{} kernel'.format(
-            patch_size_list[ind][0], patch_size_list[ind][1]), xy_off=[26, -65]
-        )
-
-
-    ############################
-    # fully connected layers
-    size_list = [(fc_unit_size, fc_unit_size)] * 3
-    num_list = [768, 500, 2]
-    num_show_list = list(map(min, num_list, [NumFcMax] * len(num_list)))
-    x_diff_list = [sum(x_diff_list) + layer_width, layer_width, layer_width]
-    top_left_list = np.c_[np.cumsum(x_diff_list), np.zeros(len(x_diff_list))]
-    loc_diff_list = [[fc_unit_size, -fc_unit_size]] * len(top_left_list)
-    text_list = ['Hidden\nunits'] * (len(size_list) - 1) + ['Outputs']
-
-    for ind in range(len(size_list)):
-        if flag_omit:
-            add_layer_with_omission(patches, colors, size=size_list[ind],
-                                    num=num_list[ind],
-                                    num_max=NumFcMax,
-                                    num_dots=NumDots,
-                                    top_left=top_left_list[ind],
-                                    loc_diff=loc_diff_list[ind])
-        else:
-            add_layer(patches, colors, size=size_list[ind],
-                      num=num_show_list[ind],
-                      top_left=top_left_list[ind],
-                      loc_diff=loc_diff_list[ind])
-        label(top_left_list[ind], text_list[ind] + '\n{}'.format(
-            num_list[ind]))
-
-    text_list = ['Flatten\n', 'Fully\nconnected', 'Fully\nconnected']
-
-    for ind in range(len(size_list)):
-        label(top_left_list[ind], text_list[ind], xy_off=[-10, -65])
-
-    ############################
-    for patch, color in zip(patches, colors):
-        patch.set_color(color * np.ones(3))
-        if isinstance(patch, Line2D):
-            ax.add_line(patch)
-        else:
-            patch.set_edgecolor(Black * np.ones(3))
-            ax.add_patch(patch)
-
-    plt.tight_layout()
-    plt.axis('equal')
+    
+       
     plt.axis('off')
     plt.show()
     fig.set_size_inches(8, 2.5)
